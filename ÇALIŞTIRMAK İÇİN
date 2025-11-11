@@ -1,0 +1,6 @@
+çalıştırmak için aşağıdakileri uygulayın 
+
+
+nano termux_şifreoluşturucu.sh
+chmod +x termux_şifreoluşturucu.sh
+./termux_şifreoluşturucu.sh
