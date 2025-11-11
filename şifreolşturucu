@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# termux_passman.sh
+# Basit etkileşimli şifre üretici ve kayıt yöneticisi (Termux uyumlu)
+# Kayıtlar: passwords.csv (aynı dizinde)
+# İzinler önerisi: chmod 700 termux_passman.sh && chmod 600 passwords.csv
+
+DATAFILE="passwords.csv"
+
+# Başlık satırı yoksa oluştur
+if [ ! -f "$DATAFILE" ]; then
+  echo "id,label,password,length,created_at" > "$DATAFILE"
+  chmod 600 "$DATAFILE"
+fi
+
+# Karışıklığa neden olabilecek karakterleri çıkaran charset örneği (isteğe göre düzenle)
+DEFAULT_CHARS='A-Za-z0-9!@#$%^&*()-_=+[]{};:,.<>/?'
+NOAMBIG_CHARS='ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*()-_=+[]{};:,.<>/?'
+
+# Fonksiyon: şifre üret
+gen_pass() {
+  local length="$1"
+  local charset="$2"
+  # openssl varsa daha kısa üretip filtre, yoksa /dev/urandom
+  if command -v openssl >/dev/null 2>&1; then
+    # baz64 ile ürettikten sonra istenen karakter kümesine filtrele
+    openssl rand -base64 $(( (length*3+3)/4 )) 2>/dev/null | tr -dc "$charset" | cut -c1-$length
+  else
+    tr -dc "$charset" < /dev/urandom | head -c "$length"
+  fi
+}
+
+# UUID basit
+gen_id() {
+  date +%s%N
+}
+
+# Menü fonksiyonları
+menu_new() {
+  echo
+  read -p "Şifre uzunluğu (default 16): " length
+  length=${length:-16}
+  if ! [[ "$length" =~ ^[0-9]+$ ]] || [ "$length" -lt 4 ]; then
+    echo "Geçersiz uzunluk. Minimum 4. Varsayılan 16 kullanılıyor."
+    length=16
+  fi
+
+  echo "Sembol kullanılsın mı? (e)vet / (h)ayır (default e): "
+  read -r use_sym
+  use_sym=${use_sym:-e}
+
+  echo "Karışık/görsel olarak karışıklığa yol açan karakterler çıkarılsın mı? (O,0,l,I,1) (e/h default h): "
+  read -r noambig
+  noambig=${noambig:-h}
+
+  if [[ "$noambig" == "e" || "$noambig" == "E" ]]; then
+    charset="$NOAMBIG_CHARS"
+  else
+    if [[ "$use_sym" == "h" || "$use_sym" == "H" ]]; then
+      charset='A-Za-z0-9'
+    else
+      charset="$DEFAULT_CHARS"
+    fi
+  fi
+
+  pw="$(gen_pass "$length" "$charset")"
+  now=$(date -Iseconds)
+  id=$(gen_id)
+
+  read -p "Bu şifreye bir isim / etiket ver (ör: instagram, facebook, banka — boş bırakma => otomatik): " label
+  if [ -z "$label" ]; then
+    label="pw_$id"
+  fi
+
+  # Kayıt: id,label,password,length,created_at
+  # (CSV formatında, parolada virgül varsa çift tırnak kullan)
+  echo "\"$id\",\"$label\",\"$pw\",\"$length\",\"$now\"" >> "$DATAFILE"
+  echo
+  echo "Oluşturuldu:"
+  echo "ID: $id"
+  echo "Etiket: $label"
+  echo "Şifre: $pw"
+  echo "Kaydedildi: $DATAFILE"
+
+  # Termux panoya kopyalama varsa sor
+  if command -v termux-clipboard-set >/dev/null 2>&1; then
+    read -p "Şifre panoya kopyalansın mı? (e/h default e): " cpyn
+    cpyn=${cpyn:-e}
+    if [[ "$cpyn" == "e" || "$cpyn" == "E" ]]; then
+      printf "%s" "$pw" | termux-clipboard-set
+      echo "(Panoya kopyalandı)"
+    fi
+  fi
+}
+
+menu_list() {
+  echo
+  echo "Kayıtlı şifreler:"
+  # Basit tablo ile göster (id, label, length, created_at) - şifreleri gizle
+  awk -F',' 'NR==1{next} {gsub(/"/,""); printf "%s) %s — uzunluk:%s — %s\n", NR-1, $2, $4, $5}' "$DATAFILE"
+  echo
+  read -p "Detay görmek için ID numarası gir (iptal için boş bırak): " sel
+  if [ -n "$sel" ]; then
+    # NR-1 ile eşleştirme: dosyada başlık olduğu için NR-1 kullanılır
+    awk -F',' -v s="$sel" 'NR==s+1 {gsub(/"/,""); print "ID: "$1"\nEtiket: "$2"\nŞifre: "$3"\nUzunluk: "$4"\nOluşturma: "$5}' "$DATAFILE"
+    # kopyalama seçeneği
+    if command -v termux-clipboard-set >/dev/null 2>&1; then
+      read -p "Bu şifre panoya kopyalansın mı? (e/h default h): " cp2
+      cp2=${cp2:-h}
+      if [[ "$cp2" == "e" || "$cp2" == "E" ]]; then
+        awk -F',' -v s="$sel" 'NR==s+1 {gsub(/"/,""); printf "%s",$3}' "$DATAFILE" | termux-clipboard-set
+        echo "(Panoya kopyalandı)"
+      fi
+    fi
+  fi
+}
+
+menu_delete() {
+  echo
+  awk -F',' 'NR==1{next} {gsub(/"/,""); printf "%s) %s — %s\n", NR-1, $1, $2}' "$DATAFILE"
+  read -p "Silmek istediğin kaydın ID numarası (iptal boş): " sid
+  if [ -n "$sid" ]; then
+    # Güvenlik: onay iste
+    awk -F',' -v s="$sid" 'NR==s+1 {gsub(/"/,""); print "Seçili: "$1" - "$2" - "$3}' "$DATAFILE"
+    read -p "Emin misin? (e/h): " confirm
+    if [[ "$confirm" == "e" || "$confirm" == "E" ]]; then
+      # filtreleyip yeni dosya yaz
+      awk -F',' -v s="$sid" 'NR==1{print; next} NR!=s+1{print}' "$DATAFILE" > "$DATAFILE.tmp" && mv "$DATAFILE.tmp" "$DATAFILE"
+      echo "Silindi."
+    else
+      echo "İptal edildi."
+    fi
+  fi
+}
+
+menu_export() {
+  echo
+  read -p "CSV dışarı aktarılacak dosya adı (default export.csv): " ex
+  ex=${ex:-export.csv}
+  cp "$DATAFILE" "$ex"
+  chmod 600 "$ex"
+  echo "Dışa aktarıldı: $ex (yerel dosya)"
+}
+
+# Ana döngü
+while true; do
+  echo
+  echo "=== Şifre oluşturucu /192168.1 ==="
+  echo "1) Yeni şifre oluştur"
+  echo "2) Kayıtları göster / detay"
+  echo "3) Kayıt sil"
+  echo "4) CSV olarak dışa aktar"
+  echo "5) Çıkış"
+  echo "================================="
+  read -p "Seçiminiz (1-5): " choice
+  case "$choice" in
+    1) menu_new ;;
+    2) menu_list ;;
+    3) menu_delete ;;
+    4) menu_export ;;
+    5) echo "Çıkılıyor..."; exit 0 ;;
+    *) echo "Geçersiz seçim." ;;
+  esac
+done
