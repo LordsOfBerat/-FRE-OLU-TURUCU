@@ -1,6 +1,6 @@
 çalıştırmak için aşağıdakileri uygulayın 
 
-
+ŞİFRE OLUŞTURUCU İSİMLİ DOSYADAKİ KODLARI ALIN VE NANO DOSYASININ İÇİNE YAPIŞTIRIN ARDINDAN CHMOD YAZAN SATIRI TERMUXTA ÇALIŞTIRIN BU İZİN AMAÇLIDIR ARDINDAN EN SON Kİ SCRİPTİ ÇALIŞTIRIN
 nano termux_şifreoluşturucu.sh
 chmod +x termux_şifreoluşturucu.sh
 ./termux_şifreoluşturucu.sh
